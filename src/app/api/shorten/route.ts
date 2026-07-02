@@ -1,71 +1,38 @@
-import { NextResponse } from 'next/server';
+import { NextRequest, NextResponse } from 'next/server';
 import { kv } from '@vercel/kv';
-
-// Global in-memory fallback for local testing if Vercel KV is not connected
-const globalForDb = globalThis as unknown as { localDb?: Map<string, string> };
-if (!globalForDb.localDb) {
-  globalForDb.localDb = new Map<string, string>();
-}
-const localDb = globalForDb.localDb;
-
-// Check if Vercel KV credentials exist in .env
-const isKvConfigured = !!process.env.KV_REST_API_URL;
 
 function generateSlug(length = 6): string {
   const chars = 'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
-  let result = '';
-  for (let i = 0; i < length; i++) {
-    result += chars.charAt(Math.floor(Math.random() * chars.length));
-  }
-  return result;
+  return Array.from({ length }, () => chars[Math.floor(Math.random() * chars.length)]).join('');
 }
 
-export async function POST(request: Request) {
+export async function POST(request: NextRequest) {
   try {
     const { url } = (await request.json()) as { url?: string };
 
     if (!url) {
-      return NextResponse.json({ error: 'URL is required' }, { status: 400 });
+      return NextResponse.json({ error: 'Missing URL parameter' }, { status: 400 });
     }
 
     try {
       new URL(url);
-    } catch (_) {
+    } catch {
       return NextResponse.json({ error: 'Invalid URL format' }, { status: 400 });
     }
 
-    let code = generateSlug();
-    let exists = false;
-
-    // Use Vercel KV if available, otherwise check local memory map
-    if (isKvConfigured) {
-      exists = !!(await kv.get(code));
-    } else {
-      exists = localDb.has(code);
+    let slug = generateSlug();
+    
+    // Ensure slug uniqueness by checking Vercel KV database
+    while (await kv.get(slug)) {
+      slug = generateSlug();
     }
 
-    let attempts = 0;
-    while (exists && attempts < 5) {
-      code = generateSlug();
-      if (isKvConfigured) {
-        exists = !!(await kv.get(code));
-      } else {
-        exists = localDb.has(code);
-      }
-      attempts++;
-    }
+    // Save the key-value pair directly in Vercel's KV database
+    await kv.set(slug, url);
 
-    // Save mapping
-    if (isKvConfigured) {
-      await kv.set(code, url);
-    } else {
-      localDb.set(code, url);
-      console.warn('⚠️ Vercel KV is not configured. Saved URL to local memory instead.');
-    }
-
-    return NextResponse.json({ code });
+    return NextResponse.json({ code: slug });
   } catch (error) {
-    console.error('Error in API route:', error);
+    console.error('Shorten API error:', error);
     return NextResponse.json({ error: 'Internal Server Error' }, { status: 500 });
   }
 }
