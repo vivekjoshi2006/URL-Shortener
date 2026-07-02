@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { kv } from '@vercel/kv';
+import { redis } from '../../redis';
 
 function generateSlug(length = 6): string {
   const chars = 'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
@@ -22,13 +22,13 @@ export async function POST(request: NextRequest) {
 
     let slug = generateSlug();
     
-    // Ensure slug uniqueness by checking Vercel KV database
-    while (await kv.get(slug)) {
+    // Ensure slug uniqueness directly within Redis
+    while (await redis.get(slug)) {
       slug = generateSlug();
     }
 
-    // Save the key-value pair directly in Vercel's KV database
-    await kv.set(slug, url);
+    // Save key-value mapping inside Redis
+    await redis.set(slug, url);
 
     return NextResponse.json({ code: slug });
   } catch (error) {
